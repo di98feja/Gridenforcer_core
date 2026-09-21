@@ -43,8 +43,10 @@ from .const import (
     CONF_RECALCULATE_STATS,
     CONF_START_DATE,
     CONF_TARGET_SENSORS,
+    CONF_TARIFF_FACTOR,
     CONF_TARIFF_SENSOR,
     CONF_TARIFF_TYPE,
+    DEFAULT_TARIFF_FACTOR,
     DOMAIN,
     OFFSET_IMPORTED_AT,
     OFFSET_SOURCE,
@@ -591,6 +593,7 @@ async def _calculate_historical_cost_from_import(
     tariff_type = entry.data.get(CONF_TARIFF_TYPE, "fixed")
     fixed_tariff = entry.data.get(CONF_FIXED_TARIFF, 0.0)
     tariff_sensor = entry.data.get(CONF_TARIFF_SENSOR)
+    tariff_factor = entry.data.get(CONF_TARIFF_FACTOR, DEFAULT_TARIFF_FACTOR)
     currency = entry.data.get(CONF_CURRENCY, "SEK")
 
     # Combine all phases' energy by hour
@@ -751,7 +754,7 @@ async def _calculate_historical_cost_from_import(
                 tariff_idx < len(tariff_schedule)
                 and tariff_schedule[tariff_idx][0] <= hour_start
             ):
-                current_tariff = tariff_schedule[tariff_idx][1]
+                current_tariff = tariff_schedule[tariff_idx][1] * tariff_factor
                 tariff_idx += 1
             tariff = current_tariff
         else:

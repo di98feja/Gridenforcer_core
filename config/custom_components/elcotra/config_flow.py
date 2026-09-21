@@ -17,11 +17,13 @@ from .const import (
     CONF_ENERGY_SENSORS,
     CONF_FIXED_TARIFF,
     CONF_NAME,
+    CONF_TARIFF_FACTOR,
     CONF_TARIFF_SENSOR,
     CONF_TARIFF_TYPE,
     CURRENCIES,
     DEFAULT_CURRENCY,
     DEFAULT_FIXED_TARIFF,
+    DEFAULT_TARIFF_FACTOR,
     DEFAULT_TARIFF_TYPE,
     TARIFF_TYPE_FIXED,
     TARIFF_TYPE_SENSOR,
@@ -75,6 +77,9 @@ class ElCoTraConfigFlow(config_entries.ConfigFlow, domain="elcotra"):
                 vol.Optional(CONF_TARIFF_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
+                vol.Optional(
+                    CONF_TARIFF_FACTOR, default=DEFAULT_TARIFF_FACTOR
+                ): cv.positive_float,
                 vol.Optional(
                     CONF_FIXED_TARIFF, default=DEFAULT_FIXED_TARIFF
                 ): cv.positive_float,

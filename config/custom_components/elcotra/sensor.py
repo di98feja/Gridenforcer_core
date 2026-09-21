@@ -45,6 +45,7 @@ async def async_setup_entry(
         ElCoTraDailyCostSensor(coordinator),
         ElCoTraMonthlyCostSensor(coordinator),
         ElCoTraYearlyCostSensor(coordinator),
+        ElCoTraLastMonthCostSensor(coordinator),
     ]
 
     async_add_entities(entities)
@@ -239,7 +240,8 @@ class ElCoTraPeriodCostBaseSensor(SensorEntity):
         self._attr_suggested_display_precision = 2
         self._attr_icon = "mdi:cash-clock"
         self._unsub_tracker = None
-        self._current_value = 0.0
+        # Unknown until the cost sensor has a value, rather than a misleading 0
+        self._current_value: float | None = None
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass."""
@@ -444,3 +446,70 @@ class ElCoTraYearlyCostSensor(ElCoTraPeriodCostBaseSensor):
         self._attr_name = f"{coordinator.entry.data[CONF_NAME]} Cost This Year"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_cost_yearly"
         self._attr_icon = "mdi:calendar"
+
+
+class ElCoTraLastMonthCostSensor(SensorEntity):
+    """Sensor showing the total cost of the previous calendar month."""
+
+    _attr_should_poll = False
+
+    def __init__(self, coordinator: ElCoTraCoordinator) -> None:
+        """Initialize the sensor."""
+        self.coordinator = coordinator
+        self._attr_name = f"{coordinator.entry.data[CONF_NAME]} Cost Last Month"
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_cost_last_month"
+        self._attr_native_unit_of_measurement = coordinator.entry.data[CONF_CURRENCY]
+        self._attr_device_class = SensorDeviceClass.MONETARY
+        self._attr_suggested_display_precision = 2
+        self._attr_icon = "mdi:calendar-arrow-left"
+        self._attr_native_value = None
+
+    async def async_added_to_hass(self) -> None:
+        """Calculate on startup and refresh every night."""
+        await super().async_added_to_hass()
+        await self._async_update_from_statistics()
+
+        # Daily rather than only on the 1st, so backfilled statistics show up.
+        # 00:05 leaves time for the recorder to compile the last hour.
+        self.async_on_remove(
+            async_track_time_change(
+                self.hass, self._scheduled_update, hour=0, minute=5, second=0
+            )
+        )
+
+    @callback
+    def _scheduled_update(self, now: datetime) -> None:
+        """Handle the nightly refresh."""
+        self.hass.async_create_task(self._async_update_from_statistics())
+
+    async def _async_update_from_statistics(self) -> None:
+        """Read last month's cost change from the recorder's monthly statistics."""
+        cost_sensor_id = er.async_get(self.hass).async_get_entity_id(
+            "sensor", DOMAIN, f"{self.coordinator.entry.entry_id}_cost"
+        )
+        if not cost_sensor_id:
+            _LOGGER.warning("Could not find cost sensor for last month calculation")
+            return
+
+        this_month = dt_util.now().replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+        last_month = (this_month - timedelta(days=1)).replace(day=1)
+
+        stats = await get_instance(self.hass).async_add_executor_job(
+            statistics_during_period,
+            self.hass,
+            last_month,
+            this_month,
+            {cost_sensor_id},
+            "month",
+            None,
+            {"change"},
+        )
+        rows = stats.get(cost_sensor_id)
+        self._attr_native_value = rows[0].get("change") if rows else None
+        self.async_write_ha_state()
+
+        _LOGGER.debug(
+            "Last month (%s) cost: %s", last_month.strftime("%Y-%m"), self.native_value
+        )

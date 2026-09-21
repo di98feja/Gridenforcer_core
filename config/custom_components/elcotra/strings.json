@@ -8,6 +8,7 @@
           "name": "Name",
           "energy_sensor": "Energy sensors (select all phases and meters to include)",
           "tariff_sensor": "Price sensor",
+          "tariff_factor": "Price sensor multiplier (e.g. currency conversion)",
           "currency": "Currency",
           "tariff_type": "Tariff type",
           "fixed_tariff": "Fixed price per kWh"

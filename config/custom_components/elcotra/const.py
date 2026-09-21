@@ -7,6 +7,9 @@ CONF_TARIFF_SENSOR = "tariff_sensor"
 CONF_TARIFF_TYPE = "tariff_type"
 CONF_FIXED_TARIFF = "fixed_tariff"
 DEFAULT_FIXED_TARIFF = 0.0
+# Multiplier applied to the tariff sensor value, e.g. 11 to turn EUR into SEK
+CONF_TARIFF_FACTOR = "tariff_factor"
+DEFAULT_TARIFF_FACTOR = 1.0
 CONF_CURRENCY = "currency"
 DEFAULT_CURRENCY = "SEK"
 CURRENCIES = ["SEK", "EUR", "USD", "GBP", "DKK", "NOK"]

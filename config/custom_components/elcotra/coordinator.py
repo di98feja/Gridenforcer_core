@@ -7,16 +7,22 @@ from datetime import datetime
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.event import async_track_time_change
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_time_change,
+)
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_ENERGY_SENSORS,
     CONF_FIXED_TARIFF,
+    CONF_TARIFF_FACTOR,
     CONF_TARIFF_SENSOR,
     CONF_TARIFF_TYPE,
+    DEFAULT_TARIFF_FACTOR,
     TARIFF_TYPE_SENSOR,
 )
 
@@ -37,11 +43,15 @@ class ElCoTraCoordinator(DataUpdateCoordinator):
         self.tariff_type: str = entry.data[CONF_TARIFF_TYPE]
         self.tariff_sensor: str | None = entry.data.get(CONF_TARIFF_SENSOR)
         self.fixed_tariff: float = entry.data.get(CONF_FIXED_TARIFF, 0.0)
+        self.tariff_factor: float = entry.data.get(
+            CONF_TARIFF_FACTOR, DEFAULT_TARIFF_FACTOR
+        )
 
         self._last_energy: float | None = None
         self._last_update: datetime | None = None
         self._accumulated_cost: float = 0.0
         self._unsub_time_tracker = None
+        self._unsub_state_tracker = None
 
         super().__init__(
             hass,
@@ -63,6 +73,27 @@ class ElCoTraCoordinator(DataUpdateCoordinator):
             self.hass, self._scheduled_update, minute=[0, 15, 30, 45], second=0
         )
         _LOGGER.info("ElCoTra scheduled to run every quarter hours")
+
+        # Source sensors (e.g. the price sensor from another integration) may
+        # come up after us. Retry as soon as they do instead of waiting for
+        # the next quarter hour.
+        sources = [*self.energy_sensors]
+        if self.tariff_type == TARIFF_TYPE_SENSOR and self.tariff_sensor:
+            sources.append(self.tariff_sensor)
+        self._unsub_state_tracker = async_track_state_change_event(
+            self.hass, sources, self._source_state_changed
+        )
+
+    @callback
+    def _source_state_changed(self, event: Event[EventStateChangedData]) -> None:
+        """Refresh right away when a source sensor recovers after a failure."""
+        if self.last_update_success:
+            return
+        new_state = event.data["new_state"]
+        if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return
+        _LOGGER.info("%s is available again, refreshing", new_state.entity_id)
+        self.hass.async_create_task(self.async_refresh())
 
     async def _wait_for_sensors(self, timeout: int = 5):
         """Wait for energy sensors to become available."""
@@ -88,6 +119,9 @@ class ElCoTraCoordinator(DataUpdateCoordinator):
         if self._unsub_time_tracker:
             self._unsub_time_tracker()
             self._unsub_time_tracker = None
+        if self._unsub_state_tracker:
+            self._unsub_state_tracker()
+            self._unsub_state_tracker = None
 
     def restore_state(self, last_energy: float | None, accumulated_cost: float) -> None:
         """Restore state from previous run."""
@@ -123,7 +157,7 @@ class ElCoTraCoordinator(DataUpdateCoordinator):
             tariff_state = self.hass.states.get(self.tariff_sensor)
             if not tariff_state or tariff_state.state in ("unavailable", "unknown"):
                 raise UpdateFailed(f"Tariff sensor {self.tariff_sensor} unavailable")
-            tariff_value = float(tariff_state.state)
+            tariff_value = float(tariff_state.state) * self.tariff_factor
         else:
             tariff_value = self.fixed_tariff
 
